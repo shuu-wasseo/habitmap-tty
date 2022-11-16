@@ -11,6 +11,7 @@ from datetime import datetime as dt
 from datetime import timedelta
 from datetime import date as d
 import calendar
+from dateutil.relativedelta import relativedelta as rltdlt
 
 import main
 
@@ -73,26 +74,51 @@ def ingrid(map, y, x, start, length):
     return True
 
 def cstart(start):
-    match len(start):
-        case 10:
-            begin = d.fromisoformat(start)
-        case 7:
-            begin = d.fromisoformat(start + "-01")
-        case 4:
-            begin = d.fromisoformat(start + "-01-01")
+    if isinstance(start, d):
+        return start
+    elif type(start) == int:
+        return int(start)
+    else:
+        match len(start):
+            case 10:
+                begin = main.cday(start)
+            case 7:
+                begin = main.cday(start + "-01")
+            case 4:
+                begin = main.cday(start + "-01-01")
+            case _:
+                if start == "tdy":
+                    return d.today()
+                elif start == "yst":
+                    return d.today() - timedelta(days=1)
+                else:
+                    return None
     return begin 
 
 def cend(end):
-    match len(end):
-        case 10:
-            end = d.fromisoformat(end)
-        case 7:
-            end = d.fromisoformat(end + "-" + str(calendar.monthrange(int(md[2][0:4]), int(md[2][5:7]))[1]))
-        case 4:
-            end = d.fromisoformat(end + "-12-31")
+    if isinstance(end, d):
+        return end
+    elif type(end) == int:
+        return int(end)
+    else:
+        match len(end):
+            case 10:
+                end = main.cday(end)
+            case 7:
+                end = main.cday(end + "-" + str(calendar.monthrange(int(md[2][0:4]), int(md[2][5:7]))[1]))
+            case 4:
+                end = main.cday(end + "-12-31")
+            case _:
+                if end == "tdy":
+                    return d.today()
+                elif end == "yst":
+                    return d.today() - timedelta(days=1)
+                else:
+                    return None
     return end
 
 def date(md, y, x):
+    date = ""
     match md[0]:
         case "yearly calendar map":
             weekd = dt(int(md[1]), 1, 1).weekday()
@@ -100,7 +126,7 @@ def date(md, y, x):
                 weekd = -1
             date = (dt(int(md[1]), 1, 1) + timedelta(days = math.floor((x-8)/2)*7 + (y-4)-weekd)).date().isoformat()
             if not ingrid(md[0], y, x, 0, 0):
-                date = "          "
+                date = ""
         case "duration map":
             max = 0
             for habit in dic:
@@ -109,20 +135,150 @@ def date(md, y, x):
                     max = len(habit)
             start = max + 5
             
-            begin = cstart(md[1])
-            end = cend(md[2])
+            begin = main.cday(str(md[1]))
+            end = main.cday(str(md[2]))
 
-            date = (begin + timedelta(days = math.floor((x-start)/2))).isoformat()
-            length = (end - begin).days
-            if not ingrid(md[0], y, x, start, length):
-                date = "          "
+            match md[3]:
+                case "day":
+                    date = (begin + timedelta(days = math.floor((x-start)/2))).isoformat()
+                    length = (end - begin).days
+                    if not ingrid(md[0], y, x, start, length):
+                        date = ""
+                case "week":
+                    sat = begin
+                    length = math.ceil((end - begin).days / 7)
+                    while sat.weekday() != 5:
+                        sat += timedelta(days=1)
+                    if not ingrid(md[0], y, x, start, length):
+                        date = ""
+                    elif x < start + 2:
+                        date = f"{begin} - {sat}"
+                    else:
+                        sat += timedelta(days = math.floor((x-start)/2) * 7)
+                        sun = sat - timedelta(days=6)
+                        date = f"{sun} - {sat}"
+                case "month":
+                    eom = dt(begin.year, begin.month, calendar.monthrange(begin.year, begin.month)[1]).date()
+                    length = (end.year - begin.year)*12 + (end.month - begin.month)
+                    if end.day - begin.day > 0:
+                        length += 1
+                    if not ingrid(md[0], y, x, start, length):
+                        date = ""
+                    elif x < start + 2:
+                        date = f"{begin} - {eom}"
+                    else:
+                        bm = eom + rltdlt(months = math.floor((x-start)/2), days = 1)
+                        em = bm + rltdlt(months = 1, days = -1) 
+                        date = f"{bm} - {em}"
+                case "year":
+                    eoy = dt(begin.year, 12, 31).date()
+                    length = end.year - begin.year
+                    if end.month - begin.month > 0 or end.day - begin.day > 0:
+                        length += 1
+                    if not ingrid(md[0], y, x, start, length):
+                        date = ""
+                    elif x < start + 2:
+                        date = f"{begin} - {eoy}"
+                    else:
+                        bm = eoy + rltdlt(years = math.floor((x-start)/2)-1, days = 1)
+                        em = bm + rltdlt(years = 1, days = -1) 
+                        date = f"{bm} - {em}"
+
     return date
 
 def livedate(window, md, col):
     x = window.getyx()[1]
     y = window.getyx()[0]
-    window.addstr(0, col, f" {date(md, y, x)} ", curses.A_REVERSE)
+    window.move(0, col)
+    window.clrtoeol()
+    window.addstr(f" {date(md, y, x)} ", curses.A_REVERSE)
+    stdscr.chgat(-1, curses.A_REVERSE)
     window.move(y, x)
+
+def toggle(stdscr, md, y, x, move):
+    map = ""
+    try:
+        md[1] = main.cday(str(md[1]))
+    except:
+        md[1] = int(md[1])
+    try:
+        md[2] = main.cday(str(md[2]))
+    except:
+        md[2] = int(md[2])
+    
+    if y == 0 and (x >= 13 and x <= len(md[0]) + 14):
+        print("changing")
+        if md[0] == "yearly calendar map":
+            md = ["duration map", str(d.today()), str(d.today()), "day"]
+            map = main.daymap(md[1], md[2], main.ccol(cols, defcol), dic, md[3])
+        elif md[0] == "duration map":
+            md = ["yearly calendar map", str(d.today().year), str(d.today().year), list(dic.keys())[0]]
+            map = main.yearmap(md[1], md[3], main.ccol(cols, defcol), dic)
+        stdscr.clear() 
+    elif y == 0 and (x >= len(md[0]) + 15 and x <= len(md[0]) + len(str(md[1])) + len(str(md[2])) + 19):
+        if md[0] == "yearly calendar map":
+            if move == "left":
+                md[1] = str(int(md[1])-1)
+            else:
+                md[1] = str(int(md[1])+1)
+            md[2] = md[1]
+            map = main.yearmap(md[1], md[3], main.ccol(cols, defcol), dic)
+        elif md[0] == "duration map":
+            if x >= len(md[0]) + len(str(md[1])) + 16:
+                if move == "left":
+                    if md[2] != md[1]:
+                        md[2] = str(md[2] - timedelta(days=1))
+                else:
+                    md[2] = str(md[2] + timedelta(days=1))
+            else:
+                if move == "left":
+                    md[1] = str(md[1] - timedelta(days=1))
+                else:
+                    if md[2] != md[1]:
+                        md[1] = str(md[1] + timedelta(days=1))
+            map = main.daymap(md[1], md[2], main.ccol(cols, defcol), dic, md[3])
+        stdscr.clear() 
+    elif y == 0 and (x >= len(md[0]) + len(str(md[1])) + len(str(md[2])) + 20 and x <= sum([len(str(x)) for x in md]) + 21):
+        if md[0] == "yearly calendar map":
+            if move == "right":
+                try:
+                    md[3] = list(dic.keys())[list(dic.keys()).index(md[3])+1]
+                except:
+                    md[3] = list(dic.keys())[0]
+            else:
+                try:
+                    md[3] = list(dic.keys())[list(dic.keys()).index(md[3])-1]
+                except:
+                    md[3] = list(dic.keys())[-1]
+            map = main.yearmap(md[1], md[3], main.ccol(cols, defcol), dic)
+        elif md[0] == "duration map":
+            durs = ["day", "week", "month", "year"]
+            try:
+                md[3] = durs[durs.index(md[3])+1]
+            except:
+                md[3] = durs[0]
+            map = main.daymap(md[1], md[2], main.ccol(cols, defcol), dic, md[3])
+        stdscr.clear()
+    else:
+        if move == "left":
+            x -= 1
+        elif move == "right":
+            x += 1
+
+    stdscr.move(0, 0)
+    stdscr.addstr("    habitmap ", curses.A_REVERSE)
+    stdscr.addstr(f" {md[0]} ")
+    stdscr.addstr(f" {md[1]} - {md[2]} ", curses.A_REVERSE)
+    stdscr.addstr(f" {md[3]} ")
+    stdscr.chgat(-1, curses.A_REVERSE)
+    stdscr.addstr(2, 0, map)
+
+    stdscr.addstr(curses.LINES-1, 0, "press q to quit")
+    stdscr.chgat(curses.LINES-1, 0, curses.A_BOLD | curses.color_pair(1))
+    stdscr.refresh()
+    stdscr.move(y, x)
+
+    return md
 
 # map interfacd
 def map(stdscr):
@@ -131,6 +287,10 @@ def map(stdscr):
     
     global md
 
+    md[1] = cstart(md[1])
+    md[2] = cend(md[2])
+
+    stdscr.move(0, 0)
     stdscr.addstr("    habitmap ", curses.A_REVERSE)
     stdscr.addstr(f" {md[0]} ")
     stdscr.addstr(f" {md[1]} - {md[2]} ", curses.A_REVERSE)
@@ -148,13 +308,13 @@ def map(stdscr):
                 case "-y" | "--year":
                     match len(sys.argv):
                         case 5:
-                            map = main.yearmap(*sys.argv[3:5], main.ccol(cols, defcol), dic)
+                            map = main.yearmap(md[1], md[3], main.ccol(cols, defcol), dic)
                         case _:
                             print("not enough arguments.")
                 case "-b" | "--bydur":
                     match len(sys.argv):
                         case 6:
-                            map = main.daymap(*sys.argv[3:5], main.ccol(cols, defcol), dic, sys.argv[5])
+                            map = main.daymap(md[1], md[2], main.ccol(cols, defcol), dic, md[3])
                         case _:
                             print("not enough arguments.")
                 case _:
@@ -167,7 +327,7 @@ def map(stdscr):
 
     while True:
         # details
-        col = sum([len(x) for x in md]) + 22
+        col = sum([len(str(x)) for x in md]) + 22
         livedate(stdscr, md, col)
         stdscr.refresh()
 
@@ -182,12 +342,12 @@ def map(stdscr):
                 case "ă":
                     stdscr.move(y-1, x)
                 case "Ą":
-                    stdscr.move(y, x-1)
+                    md = toggle(stdscr, md, y, x, "left")
                 case "Ă":
                     stdscr.move(y+1, x)
                 case "ą":
-                    stdscr.move(y, x+1)
-                
+                    md = toggle(stdscr, md, y, x, "right")
+                                    
                 # tracking:
                 case "0" | "1" | "2" | "3" | "4":
 
@@ -200,19 +360,23 @@ def map(stdscr):
 
                     begin = cstart(md[1])
                     end = cend(md[2])
-                    length = (end - begin).days
+                    try:
+                        length = (end - begin).days
+                    except:
+                        length = 0
+
 
                     if ingrid(map, y, x, start, length):
                         match md[0]:
                             case "yearly calendar map":
                                 main.track(dic, date(md, y, x), md[3], chr(c))
-                                map = main.yearmap(*sys.argv[3:5], main.ccol(cols, defcol), dic)
+                                map = main.yearmap(md[1], md[3], main.ccol(cols, defcol), dic)
 
                             case "duration map":
                                 if md[3] == "day":  
                                     try:
                                         main.track(dic, date(md, y, x), list(dic.keys())[y-5], chr(c))
-                                        map = main.daymap(*sys.argv[3:5], main.ccol(cols, defcol), dic, sys.argv[5])
+                                        map = main.daymap(md[1], md[2], main.ccol(cols, defcol), dic, md[3])
                                     except:
                                         pass
                     else:

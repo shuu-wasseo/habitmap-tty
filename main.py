@@ -75,8 +75,6 @@ def cday(day):
                 if isinstance(day, dt.date):
                     return day
                 else:
-                    open('output.txt', 'a').write(day)
-                    open('output.txt', 'a').write("invalid day. the 'day' argument must either be 'tdy', 'yst', the first three letters of a day of the week or a date in ISO format (YYYY-MM-DD).")
                     exit()
     else:
         return day
@@ -163,7 +161,10 @@ def daymap(begin, end, col, json, bydur):
     if col == []:
         col = ["#FFFFFF"]
 
-    match len(str(begin)):
+    begin = str(begin)
+    end = str(end)
+
+    match len(begin):
         case 10:
             begin = dt.date.fromisoformat(begin)
         case 7:
@@ -171,7 +172,7 @@ def daymap(begin, end, col, json, bydur):
         case 4:
             begin = dt.date.fromisoformat(begin + "-01-01")
 
-    match len(str(end)):
+    match len(end):
         case 10:
             end = dt.date.fromisoformat(end)
         case 7:
@@ -185,7 +186,7 @@ def daymap(begin, end, col, json, bydur):
     max = 2
     lis = ["yy", "mm", "dd"]
     
-    for habit in list(json.keys()) + ["overall"]:
+    for habit in list(json.keys()) + ["overall", ""]:
         habit = habit.strip()
         if len(habit) > max:
             max = len(habit)
@@ -202,10 +203,7 @@ def daymap(begin, end, col, json, bydur):
         # start += dt.timedelta(days=1) 
     colno = 0
 
-    if start > end:
-        print("start is later than end. please try again.")
     while start <= end:
-        co = col[colno % len(col)]
         match bydur:
             case "day":
                 ns = start + dateutil.relativedelta.relativedelta(days=+1)
@@ -268,7 +266,7 @@ def daymap(begin, end, col, json, bydur):
             elif habit in ["yy", "mm", "dd"]:
                 match habit:
                     case "yy":
-                        if ps.year != start.year or start == st or start == end:
+                        if ps.year != start.year or start == st or start == end or ns > end:
                             if start.year < 10:
                                 string += "0" + str(start.year)
                             else:
@@ -276,7 +274,9 @@ def daymap(begin, end, col, json, bydur):
                         else:
                             string += "  "
                     case "mm":
-                        if ps.month != start.month or start == st or start == end:
+                        if bydur == "year":
+                            string += "  "
+                        elif ps.month != start.month or start == st or start == end or ns > end:
                             if start.month < 10:
                                 string += "0" + str(start.month)
                             else:
@@ -284,7 +284,14 @@ def daymap(begin, end, col, json, bydur):
                         else:
                             string += "  "
                     case "dd":
-                        if start.day == 1:
+                        if bydur == "month" or bydur == "year":
+                            string += "  "
+                        elif bydur == "week" or ns > end:
+                            if start.day < 10:
+                                string += "0" + str(start.day)
+                            else:
+                                string += str(start.day)
+                        elif start.day == 1:
                             string += "01"
                         elif start.day == 5:
                             string += "05"
@@ -323,6 +330,7 @@ def daymap(begin, end, col, json, bydur):
                     case 4:
                         string += "██" 
             strings[habit] = string
+
         ps = start
         start = ns
         colno += 1
@@ -341,7 +349,11 @@ def monthmap(begin, end, col, json):
     return daymap(begin, end, col, json, "day")
 
 def yearmap(year, habit, col, json):
-    stat = json[habit][str(year)]
+    try:
+        stat = json[habit][str(year)]
+    except:
+        newyear(json, habit, year)
+        stat = json[habit][str(year)]
     yearindow = [[], [], [], [], [], [], []]
     strings = []
     months = [0]
@@ -355,8 +367,8 @@ def yearmap(year, habit, col, json):
         yearindow[x].append(0)
     for x in range(12):
         for y in range(len(stat[x])):
-            yearindow[twkd(dt.date(dt.date.today().year,x+1,y+1))].append(int(stat[x][y]))
-            if twkd(dt.date(dt.date.today().year,x+1,y+1)) == 6:
+            yearindow[twkd(dt.date(int(year),x+1,y+1))].append(int(stat[x][y]))
+            if twkd(dt.date(int(year),x+1,y+1)) == 6:
                 weekcount += 1
         months.append(weekcount)
 
