@@ -1,0 +1,232 @@
+#!/usr/bin/python3
+
+# setup
+import curses
+import sys
+import json
+import toml
+import os
+import math
+from datetime import datetime as dt
+from datetime import timedelta
+from datetime import date as d
+import calendar
+
+import main
+
+dic = json.loads(open(os.getcwd()+'/stats.json').read().strip('"').replace(' ":', '":'))
+  
+sett = toml.load(open(os.getcwd()+'/config.toml'))
+
+defcol = sett["defcol"]
+cols = sett["cols"]
+if cols == []:
+    cols = ["#FFFFFF"]
+
+# initialising
+
+stdscr = curses.initscr()
+
+if curses.has_colors():
+    curses.start_color()
+
+curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
+
+curses.init_color(1, 255, 0, 0)
+curses.init_color(2, 0, 255, 0)
+curses.init_color(3, 0, 0, 255)
+
+md = []
+
+match sys.argv[1]:
+    case "map":
+        match sys.argv[2]:
+            case "-b":
+                md.append("duration map")
+                for x in sys.argv[3:5]:
+                    md.append(x)
+                md.append(sys.argv[5])
+            case "-y":
+                md.append("yearly calendar map")
+                md.append(sys.argv[3])
+                md.append(sys.argv[3])
+                md.append(sys.argv[4])
+            case _:
+                print("invalid")
+
+def coords(window):
+    x = window.getyx()[1]
+    y = window.getyx()[0]
+    window.addstr(curses.LINES-2, 0, f"({y}, {x}) ")
+    window.move(y, x)
+
+def ingrid(map, y, x, start, length):
+    match map:
+        case "yearly calendar map":
+            if x < 8 or x > 113 or y < 3 or y > 9:
+                return False
+        case "duration map":
+            if x < start or x > (start + length * 2) + 1 or y < 5 or y > 5 + len(list(dic.keys())):
+                return False
+    return True
+
+def cstart(start):
+    match len(start):
+        case 10:
+            begin = d.fromisoformat(start)
+        case 7:
+            begin = d.fromisoformat(start + "-01")
+        case 4:
+            begin = d.fromisoformat(start + "-01-01")
+    return begin 
+
+def cend(end):
+    match len(end):
+        case 10:
+            end = d.fromisoformat(end)
+        case 7:
+            end = d.fromisoformat(end + "-" + str(calendar.monthrange(int(md[2][0:4]), int(md[2][5:7]))[1]))
+        case 4:
+            end = d.fromisoformat(end + "-12-31")
+    return end
+
+def date(md, y, x):
+    match md[0]:
+        case "yearly calendar map":
+            weekd = dt(int(md[1]), 1, 1).weekday()
+            if weekd == 6:
+                weekd = -1
+            date = (dt(int(md[1]), 1, 1) + timedelta(days = math.floor((x-8)/2)*7 + (y-4)-weekd)).date().isoformat()
+            if not ingrid(md[0], y, x, 0, 0):
+                date = "          "
+        case "duration map":
+            max = 0
+            for habit in dic:
+                habit = habit.strip()
+                if len(habit) > max:
+                    max = len(habit)
+            start = max + 5
+            
+            begin = cstart(md[1])
+            end = cend(md[2])
+
+            date = (begin + timedelta(days = math.floor((x-start)/2))).isoformat()
+            length = (end - begin).days
+            if not ingrid(md[0], y, x, start, length):
+                date = "          "
+    return date
+
+def livedate(window, md, col):
+    x = window.getyx()[1]
+    y = window.getyx()[0]
+    window.addstr(0, col, f" {date(md, y, x)} ", curses.A_REVERSE)
+    window.move(y, x)
+
+# map interfacd
+def map(stdscr):
+    stdscr.clear()
+    coords(stdscr)
+    
+    global md
+
+    stdscr.addstr("    habitmap ", curses.A_REVERSE)
+    stdscr.addstr(f" {md[0]} ")
+    stdscr.addstr(f" {md[1]} - {md[2]} ", curses.A_REVERSE)
+    stdscr.addstr(f" {md[3]} ")
+    stdscr.chgat(-1, curses.A_REVERSE) 
+    
+    stdscr.addstr(curses.LINES-1, 0, "press q to quit")
+    stdscr.chgat(curses.LINES-1, 0, curses.A_BOLD | curses.color_pair(1))
+    
+    map = ""
+
+    match sys.argv[1]:
+        case "map":
+            match sys.argv[2]:
+                case "-y" | "--year":
+                    match len(sys.argv):
+                        case 5:
+                            map = main.yearmap(*sys.argv[3:5], main.ccol(cols, defcol), dic)
+                        case _:
+                            print("not enough arguments.")
+                case "-b" | "--bydur":
+                    match len(sys.argv):
+                        case 6:
+                            map = main.daymap(*sys.argv[3:5], main.ccol(cols, defcol), dic, sys.argv[5])
+                        case _:
+                            print("not enough arguments.")
+                case _:
+                    print("invalid command.")
+
+    stdscr.addstr(2, 0, map)
+
+    stdscr.noutrefresh()
+    curses.doupdate()
+
+    while True:
+        # details
+        col = sum([len(x) for x in md]) + 22
+        livedate(stdscr, md, col)
+        stdscr.refresh()
+
+        # key input
+        c = stdscr.getch()
+        x = stdscr.getyx()[1]
+        y = stdscr.getyx()[0]
+        coords(stdscr) 
+        try:
+            match chr(c):
+                # arrow keys:
+                case "ă":
+                    stdscr.move(y-1, x)
+                case "Ą":
+                    stdscr.move(y, x-1)
+                case "Ă":
+                    stdscr.move(y+1, x)
+                case "ą":
+                    stdscr.move(y, x+1)
+                
+                # tracking:
+                case "0" | "1" | "2" | "3" | "4":
+
+                    max = 0
+                    for habit in dic:
+                        habit = habit.strip()
+                        if len(habit) > max:
+                            max = len(habit)
+                    start = max + 5
+
+                    begin = cstart(md[1])
+                    end = cend(md[2])
+                    length = (end - begin).days
+
+                    if ingrid(map, y, x, start, length):
+                        match md[0]:
+                            case "yearly calendar map":
+                                main.track(dic, date(md, y, x), md[3], chr(c))
+                                map = main.yearmap(*sys.argv[3:5], main.ccol(cols, defcol), dic)
+
+                            case "duration map":
+                                if md[3] == "day":  
+                                    try:
+                                        main.track(dic, date(md, y, x), list(dic.keys())[y-5], chr(c))
+                                        map = main.daymap(*sys.argv[3:5], main.ccol(cols, defcol), dic, sys.argv[5])
+                                    except:
+                                        pass
+                    else:
+                        pass
+
+                    stdscr.addstr(2, 0, map)
+                    stdscr.move(y, x)
+                    
+                # quit:
+                case "q" | "Q":
+                    json.dump(dic, open('stats.json', 'w'), indent=4, default=str)
+                    break
+        except curses.error:
+            pass
+        
+curses.wrapper(map)
+
